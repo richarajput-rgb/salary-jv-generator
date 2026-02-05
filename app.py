@@ -27,31 +27,47 @@ if uploaded_file:
     ref = f"BEING SALARY ENTRY POSTED FOR {month_year}"
 
     # ============================
-    # COLUMN POSITIONS (SAME AS YOUR LOCAL SCRIPT)
+    # COLUMN POSITIONS
     # ============================
 
-    # ---- BRANCH SHEET MAPPING ----
-    COL_BCODES = 1          # B
+    COL_BCODES = 1          # B (MASTER BRANCH COLUMN)
     START_EXP_COL = 2       # C
     END_EXP_COL = 10        # K
 
-    # ---- HO001 SHEET MAPPING ----
-    COL_BCODES_HO = 27      # HO001 column (your original)
+    COL_BCODES_HO = 27      # HO001 column in your file
     COL_ACCOUNT = 28        # AC
     COL_SUB_ACCOUNT = 29    # AD
     COL_DEBIT = 31          # AF
     COL_CREDIT = 32         # AG
 
-    # Trim spaces
-    df[COL_BCODES] = df[COL_BCODES].astype(str).str.strip()
-    df.iloc[:, COL_BCODES_HO] = df.iloc[:, COL_BCODES_HO].astype(str).str.strip()
-
-    # ---- FILTERS (MATCHING YOUR PYCHARM SCRIPT) ----
-    df_others = df[df[COL_BCODES].str.upper() != "HO001"].copy()
-    df_ho = df[df.iloc[:, COL_BCODES_HO].str.upper() == "HO001"].copy()
+    # -------- CLEAN BRANCH COLUMN (CRITICAL) --------
+    df["__BRANCH_CLEAN"] = (
+        df[COL_BCODES]
+        .astype(str)
+        .str.strip()
+        .str.upper()
+    )
 
     # ============================
-    # OUTPUT COLUMNS (EXACT SAME AS YOUR OUTPUT FILE)
+    # STRICT FILTERS (NO NaN IN BRANCH SHEET)
+    # ============================
+
+    # HO001 rows (same as your file logic)
+    df_ho = df[df.iloc[:, COL_BCODES_HO].astype(str).str.strip().str.upper() == "HO001"].copy()
+
+    # OTHER BRANCHES — STRICT (REMOVE BLANK / "nan")
+    df_others = (
+        df[df["__BRANCH_CLEAN"] != "HO001"]
+        .copy()
+        .loc[df[COL_BCODES].notna()]
+    )
+
+    df_others = df_others[
+        ~df_others["__BRANCH_CLEAN"].str.lower().isin(["nan", "none", ""])
+    ]
+
+    # ============================
+    # OUTPUT COLUMNS
     # ============================
     columns = [
         "Journal Code",
@@ -72,17 +88,14 @@ if uploaded_file:
     ]
 
     # ============================
-    # 1️⃣ OTHER BRANCHES LOGIC (SAME AS PYCHARM)
+    # 1️⃣ OTHER BRANCHES LOGIC (NO nan ROWS NOW)
     # ============================
 
     all_rows = []
 
     for _, r in df_others.iterrows():
 
-        branch = r[COL_BCODES]
-
-        if branch == "" or pd.isna(branch):
-            continue
+        branch = str(r["__BRANCH_CLEAN"])
 
         for i, col in enumerate(range(START_EXP_COL, END_EXP_COL + 1)):
 
@@ -94,7 +107,6 @@ if uploaded_file:
 
             account = int(account)
 
-            # Debit line
             all_rows.append({
                 "Journal Code": "JV",
                 "Sequence": 1,
@@ -113,7 +125,6 @@ if uploaded_file:
                 "Comments": ref
             })
 
-            # Credit line
             all_rows.append({
                 "Journal Code": "JV",
                 "Sequence": 2,
@@ -133,15 +144,13 @@ if uploaded_file:
             })
 
     # ============================
-    # 2️⃣ HO001 LOGIC (MULTIPLE ROWS — SAME AS PYCHARM)
+    # 2️⃣ HO001 LOGIC (MULTIPLE ROWS)
     # ============================
 
     ho_rows = []
     seq = 1
 
     for _, r in df_ho.iterrows():
-
-        branch = str(r[COL_BCODES_HO]).strip()
 
         account = r[COL_ACCOUNT]
         sub_acc = r[COL_SUB_ACCOUNT]
@@ -160,8 +169,8 @@ if uploaded_file:
             "Journal Code": "JV",
             "Sequence": seq,
             "Account": account,
-            "Sub Account": "" if pd.isna(sub_acc) else sub_acc,
-            "Department": branch,
+            "Sub Account": "" if pd.isna(sub_acc) or str(sub_acc).lower() == "nan" else str(sub_acc),
+            "Department": "HO001",
             "Document Date": doc_date,
             "Debit": debit_amt,
             "Credit": credit_amt,
@@ -169,7 +178,7 @@ if uploaded_file:
             "Customer Id": "",
             "SAC/HSN": "",
             "Reference": ref,
-            "Branch Id": branch,
+            "Branch Id": "HO001",
             "Invoice Num": "",
             "Comments": ref
         })
@@ -177,7 +186,7 @@ if uploaded_file:
         seq += 1
 
     # ============================
-    # 3️⃣ NEW SHEET: HO001_ADJUSTMENT_JV (BASED ONLY ON AK COLUMN)
+    # 3️⃣ HO001 ADJUSTMENT SHEET
     # ============================
 
     adj_rows = []
@@ -232,7 +241,7 @@ if uploaded_file:
 
     seq += 1
 
-    # -------- SUPPLIER-WISE LINES (ONLY WHERE AK HAS DATA) --------
+    # -------- SUPPLIER-WISE LINES --------
     df_valid = df[df["_AK_NUM"] != 0].copy()
 
     for _, r in df_valid.iterrows():
@@ -272,7 +281,7 @@ if uploaded_file:
         df.drop(columns=["_AK_NUM"], inplace=True)
 
     # ============================
-    # CREATE OUTPUT FILE IN MEMORY
+    # CREATE OUTPUT FILE
     # ============================
 
     output = BytesIO()
