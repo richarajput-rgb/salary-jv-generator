@@ -18,8 +18,9 @@ uploaded_file = st.file_uploader("Upload SALARY ENTRY.xlsx", type=["xlsx"])
 
 if uploaded_file:
 
-    # -------- Read Excel --------
-    df = pd.read_excel(uploaded_file, header=None)
+    # -------- Read Excel (FIX FOR STREAMLIT CLOUD) --------
+    file_bytes = uploaded_file.read()
+    df = pd.read_excel(file_bytes, header=None, engine="openpyxl")
 
     # -------- Extract C1–K1 accounts for other branches --------
     account_headers = df.iloc[0, 2:11].values  # C1 to K1
