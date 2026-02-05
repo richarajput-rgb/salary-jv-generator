@@ -1,15 +1,15 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import io   # IMPORTANT for Streamlit Cloud Excel fix
+from io import BytesIO
 
-st.set_page_config(page_title="Salary JV Generator", layout="wide")
+st.set_page_config(page_title="Salary JV Generator", layout="centered")
 
 st.title("📊 Salary JV Upload Generator")
-
 st.write("""
 Upload your **SALARY ENTRY.xlsx** file and download the generated  
 **Salary_JV_Upload.xlsx** with three sheets:
+
 - All_Branches_JV  
 - HO001_JV  
 - HO001_Adjustment_JV  
@@ -19,9 +19,9 @@ uploaded_file = st.file_uploader("Upload SALARY ENTRY.xlsx", type=["xlsx"])
 
 if uploaded_file:
 
-    # -------- Read Excel (STREAMLIT CLOUD SAFE METHOD) --------
+    # -------- Read Excel (Streamlit-safe way) --------
     file_bytes = uploaded_file.read()
-    df = pd.read_excel(io.BytesIO(file_bytes), header=None)
+    df = pd.read_excel(file_bytes, header=None, engine="openpyxl")
 
     # -------- Extract C1–K1 accounts for other branches --------
     account_headers = df.iloc[0, 2:11].values  # C1 to K1
@@ -30,7 +30,7 @@ if uploaded_file:
     df = df.iloc[2:].reset_index(drop=True)
 
     # -------- Document date & reference --------
-    doc_date = st.date_input("Select Document Date", datetime.today()).strftime("%d-%m-%Y")
+    doc_date = "31-03-2026"
     month_year = datetime.strptime(doc_date, "%d-%m-%Y").strftime("%B %Y")
     ref = f"BEING SALARY ENTRY POSTED FOR {month_year}"
 
@@ -38,10 +38,13 @@ if uploaded_file:
     # COLUMN POSITIONS
     # ============================
 
+    # ---- BRANCH SHEET MAPPING ----
     COL_BCODES = 1          # B
     START_EXP_COL = 2       # C
     END_EXP_COL = 10        # K
 
+    # ---- HO001 SHEET MAPPING ----
+    COL_BCODES_HO = 27      # HO001 column
     COL_ACCOUNT = 28        # AC
     COL_SUB_ACCOUNT = 29    # AD
     COL_DEBIT = 31          # AF
@@ -49,10 +52,11 @@ if uploaded_file:
 
     # Trim spaces
     df[COL_BCODES] = df[COL_BCODES].astype(str).str.strip()
+    df.iloc[:, COL_BCODES_HO] = df.iloc[:, COL_BCODES_HO].astype(str).str.strip()
 
     # ---- FILTERS ----
     df_others = df[df[COL_BCODES].str.upper() != "HO001"].copy()
-    df_ho = df[df[COL_BCODES].str.upper() == "HO001"].copy()
+    df_ho = df[df.iloc[:, COL_BCODES_HO].str.upper() == "HO001"].copy()
 
     # ============================
     # OUTPUT COLUMNS
@@ -145,6 +149,8 @@ if uploaded_file:
 
     for _, r in df_ho.iterrows():
 
+        branch = str(r[COL_BCODES_HO]).strip()
+
         account = r[COL_ACCOUNT]
         sub_acc = r[COL_SUB_ACCOUNT]
         debit_input = r[COL_DEBIT]
@@ -163,7 +169,7 @@ if uploaded_file:
             "Sequence": seq,
             "Account": account,
             "Sub Account": "" if pd.isna(sub_acc) else sub_acc,
-            "Department": "HO001",
+            "Department": branch,
             "Document Date": doc_date,
             "Debit": debit_amt,
             "Credit": credit_amt,
@@ -171,7 +177,7 @@ if uploaded_file:
             "Customer Id": "",
             "SAC/HSN": "",
             "Reference": ref,
-            "Branch Id": "HO001",
+            "Branch Id": branch,
             "Invoice Num": "",
             "Comments": ref
         })
@@ -179,13 +185,13 @@ if uploaded_file:
         seq += 1
 
     # ============================
-    # 3️⃣ HO001 ADJUSTMENT SHEET
+    # 3️⃣ NEW SHEET: HO001_ADJUSTMENT_JV
     # ============================
 
     adj_rows = []
     seq = 1
 
-    # Auto-detect AK column (AJ=35 or AK=36)
+    # Try to auto-detect correct AK column
     possible_ak_cols = [35, 36]
 
     for col in possible_ak_cols:
@@ -200,6 +206,7 @@ if uploaded_file:
 
         if tmp.abs().sum() > 0:
             df["_AK_NUM"] = tmp
+            AK_COL = col
             break
     else:
         df["_AK_NUM"] = (
@@ -210,8 +217,9 @@ if uploaded_file:
             .replace("nan", "0")
         )
         df["_AK_NUM"] = pd.to_numeric(df["_AK_NUM"], errors="coerce").fillna(0)
+        AK_COL = 36
 
-    # -------- Line 1: Total Debit Line --------
+    # -------- LINE 1: TOTAL DEBIT LINE (413201 / HO0005) --------
     total_amount = df["_AK_NUM"].sum()
 
     adj_rows.append({
@@ -234,7 +242,7 @@ if uploaded_file:
 
     seq += 1
 
-    # -------- Supplier-wise lines (only where AK has data) --------
+    # -------- SUPPLIER-WISE LINES (ONLY WHERE AK HAS DATA) --------
     df_valid = df[df["_AK_NUM"] != 0].copy()
 
     for _, r in df_valid.iterrows():
@@ -270,37 +278,36 @@ if uploaded_file:
 
         seq += 1
 
+    # Drop temp column
     if "_AK_NUM" in df.columns:
         df.drop(columns=["_AK_NUM"], inplace=True)
 
     # ============================
-    # CREATE OUTPUT FILE
+    # CREATE OUTPUT FILE IN MEMORY
     # ============================
 
-    output_path = "/tmp/Salary_JV_Upload.xlsx"
+    output = BytesIO()
 
-    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
         pd.DataFrame(all_rows, columns=columns).to_excel(
             writer, sheet_name="All_Branches_JV", index=False
         )
+
         pd.DataFrame(ho_rows, columns=columns).to_excel(
             writer, sheet_name="HO001_JV", index=False
         )
+
         pd.DataFrame(adj_rows, columns=columns).to_excel(
             writer, sheet_name="HO001_Adjustment_JV", index=False
         )
 
+    output.seek(0)
+
     st.success("✅ File generated successfully!")
 
-    with open(output_path, "rb") as f:
-        st.download_button(
-            label="📥 Download Salary_JV_Upload.xlsx",
-            data=f,
-            file_name="Salary_JV_Upload.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-
-    st.write("Rows created:")
-    st.write(f"All Branches: {len(all_rows)}")
-    st.write(f"HO001: {len(ho_rows)}")
-    st.write(f"Adjustment: {len(adj_rows)}")
+    st.download_button(
+        label="📥 Download Salary_JV_Upload.xlsx",
+        data=output,
+        file_name="Salary_JV_Upload.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
