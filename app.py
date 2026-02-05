@@ -38,25 +38,21 @@ if uploaded_file:
     # COLUMN POSITIONS
     # ============================
 
-    # ---- BRANCH SHEET MAPPING ----
-    COL_BCODES = 1          # B
+    COL_BCODES = 1          # B (BRANCH COLUMN — MASTER FILTER)
     START_EXP_COL = 2       # C
     END_EXP_COL = 10        # K
 
-    # ---- HO001 SHEET MAPPING ----
-    COL_BCODES_HO = 27      # HO001 column
     COL_ACCOUNT = 28        # AC
     COL_SUB_ACCOUNT = 29    # AD
     COL_DEBIT = 31          # AF
     COL_CREDIT = 32         # AG
 
-    # Trim spaces
-    df[COL_BCODES] = df[COL_BCODES].astype(str).str.strip()
-    df.iloc[:, COL_BCODES_HO] = df.iloc[:, COL_BCODES_HO].astype(str).str.strip()
+    # ---------- SAFE BRANCH CLEAN COLUMN (CRITICAL FIX) ----------
+    df["__BRANCH_CLEAN"] = df[COL_BCODES].astype(str).str.strip().str.upper()
 
-    # ---- FILTERS ----
-    df_others = df[df[COL_BCODES].str.upper() != "HO001"].copy()
-    df_ho = df[df.iloc[:, COL_BCODES_HO].str.upper() == "HO001"].copy()
+    # ---- SAFE FILTERS (MATCHES LOCAL PYTHON) ----
+    df_ho = df[df["__BRANCH_CLEAN"] == "HO001"].copy()
+    df_others = df[df["__BRANCH_CLEAN"] != "HO001"].copy()
 
     # ============================
     # OUTPUT COLUMNS
@@ -80,17 +76,14 @@ if uploaded_file:
     ]
 
     # ============================
-    # 1️⃣ OTHER BRANCHES LOGIC
+    # 1️⃣ OTHER BRANCHES LOGIC  (NO HO001 CAN ENTER HERE NOW)
     # ============================
 
     all_rows = []
 
     for _, r in df_others.iterrows():
 
-        branch = r[COL_BCODES]
-
-        if branch == "" or pd.isna(branch):
-            continue
+        branch = str(r["__BRANCH_CLEAN"])  # SAFE BRANCH
 
         for i, col in enumerate(range(START_EXP_COL, END_EXP_COL + 1)):
 
@@ -141,15 +134,13 @@ if uploaded_file:
             })
 
     # ============================
-    # 2️⃣ HO001 LOGIC
+    # 2️⃣ HO001 LOGIC (LOCKED TO HO001)
     # ============================
 
     ho_rows = []
     seq = 1
 
     for _, r in df_ho.iterrows():
-
-        branch = str(r[COL_BCODES_HO]).strip()
 
         account = r[COL_ACCOUNT]
         sub_acc = r[COL_SUB_ACCOUNT]
@@ -169,7 +160,7 @@ if uploaded_file:
             "Sequence": seq,
             "Account": account,
             "Sub Account": "" if pd.isna(sub_acc) else sub_acc,
-            "Department": branch,
+            "Department": "HO001",      # HARDLOCK
             "Document Date": doc_date,
             "Debit": debit_amt,
             "Credit": credit_amt,
@@ -177,7 +168,7 @@ if uploaded_file:
             "Customer Id": "",
             "SAC/HSN": "",
             "Reference": ref,
-            "Branch Id": branch,
+            "Branch Id": "HO001",      # HARDLOCK
             "Invoice Num": "",
             "Comments": ref
         })
@@ -185,13 +176,13 @@ if uploaded_file:
         seq += 1
 
     # ============================
-    # 3️⃣ NEW SHEET: HO001_ADJUSTMENT_JV
+    # 3️⃣ HO001 ADJUSTMENT SHEET
     # ============================
 
     adj_rows = []
     seq = 1
 
-    # Try to auto-detect correct AK column
+    # Auto-detect AK column (AJ=35 or AK=36)
     possible_ak_cols = [35, 36]
 
     for col in possible_ak_cols:
@@ -206,7 +197,6 @@ if uploaded_file:
 
         if tmp.abs().sum() > 0:
             df["_AK_NUM"] = tmp
-            AK_COL = col
             break
     else:
         df["_AK_NUM"] = (
@@ -217,7 +207,6 @@ if uploaded_file:
             .replace("nan", "0")
         )
         df["_AK_NUM"] = pd.to_numeric(df["_AK_NUM"], errors="coerce").fillna(0)
-        AK_COL = 36
 
     # -------- LINE 1: TOTAL DEBIT LINE (413201 / HO0005) --------
     total_amount = df["_AK_NUM"].sum()
@@ -278,7 +267,6 @@ if uploaded_file:
 
         seq += 1
 
-    # Drop temp column
     if "_AK_NUM" in df.columns:
         df.drop(columns=["_AK_NUM"], inplace=True)
 
@@ -292,11 +280,9 @@ if uploaded_file:
         pd.DataFrame(all_rows, columns=columns).to_excel(
             writer, sheet_name="All_Branches_JV", index=False
         )
-
         pd.DataFrame(ho_rows, columns=columns).to_excel(
             writer, sheet_name="HO001_JV", index=False
         )
-
         pd.DataFrame(adj_rows, columns=columns).to_excel(
             writer, sheet_name="HO001_Adjustment_JV", index=False
         )
@@ -311,3 +297,8 @@ if uploaded_file:
         file_name="Salary_JV_Upload.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+    st.write("Rows created:")
+    st.write(f"All Branches: {len(all_rows)}")
+    st.write(f"HO001: {len(ho_rows)}")
+    st.write(f"Adjustment: {len(adj_rows)}")
