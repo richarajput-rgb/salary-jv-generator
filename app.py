@@ -6,20 +6,12 @@ from io import BytesIO
 st.set_page_config(page_title="Salary JV Generator", layout="centered")
 
 st.title("📊 Salary JV Upload Generator")
-st.write("""
-Upload your **SALARY ENTRY.xlsx** file and download the generated  
-**Salary_JV_Upload.xlsx** with three sheets:
-
-- All_Branches_JV  
-- HO001_JV  
-- HO001_Adjustment_JV  
-""")
 
 uploaded_file = st.file_uploader("Upload SALARY ENTRY.xlsx", type=["xlsx"])
 
 if uploaded_file:
 
-    # -------- Read Excel (Streamlit-safe way) --------
+    # -------- Read Excel --------
     file_bytes = uploaded_file.read()
     df = pd.read_excel(file_bytes, header=None, engine="openpyxl")
 
@@ -35,27 +27,31 @@ if uploaded_file:
     ref = f"BEING SALARY ENTRY POSTED FOR {month_year}"
 
     # ============================
-    # COLUMN POSITIONS
+    # COLUMN POSITIONS (SAME AS YOUR LOCAL SCRIPT)
     # ============================
 
-    COL_BCODES = 1          # B (BRANCH COLUMN — MASTER FILTER)
+    # ---- BRANCH SHEET MAPPING ----
+    COL_BCODES = 1          # B
     START_EXP_COL = 2       # C
     END_EXP_COL = 10        # K
 
+    # ---- HO001 SHEET MAPPING ----
+    COL_BCODES_HO = 27      # HO001 column (your original)
     COL_ACCOUNT = 28        # AC
     COL_SUB_ACCOUNT = 29    # AD
     COL_DEBIT = 31          # AF
     COL_CREDIT = 32         # AG
 
-    # ---------- SAFE BRANCH CLEAN COLUMN (CRITICAL FIX) ----------
-    df["__BRANCH_CLEAN"] = df[COL_BCODES].astype(str).str.strip().str.upper()
+    # Trim spaces
+    df[COL_BCODES] = df[COL_BCODES].astype(str).str.strip()
+    df.iloc[:, COL_BCODES_HO] = df.iloc[:, COL_BCODES_HO].astype(str).str.strip()
 
-    # ---- SAFE FILTERS (MATCHES LOCAL PYTHON) ----
-    df_ho = df[df["__BRANCH_CLEAN"] == "HO001"].copy()
-    df_others = df[df["__BRANCH_CLEAN"] != "HO001"].copy()
+    # ---- FILTERS (MATCHING YOUR PYCHARM SCRIPT) ----
+    df_others = df[df[COL_BCODES].str.upper() != "HO001"].copy()
+    df_ho = df[df.iloc[:, COL_BCODES_HO].str.upper() == "HO001"].copy()
 
     # ============================
-    # OUTPUT COLUMNS
+    # OUTPUT COLUMNS (EXACT SAME AS YOUR OUTPUT FILE)
     # ============================
     columns = [
         "Journal Code",
@@ -76,14 +72,17 @@ if uploaded_file:
     ]
 
     # ============================
-    # 1️⃣ OTHER BRANCHES LOGIC  (NO HO001 CAN ENTER HERE NOW)
+    # 1️⃣ OTHER BRANCHES LOGIC (SAME AS PYCHARM)
     # ============================
 
     all_rows = []
 
     for _, r in df_others.iterrows():
 
-        branch = str(r["__BRANCH_CLEAN"])  # SAFE BRANCH
+        branch = r[COL_BCODES]
+
+        if branch == "" or pd.isna(branch):
+            continue
 
         for i, col in enumerate(range(START_EXP_COL, END_EXP_COL + 1)):
 
@@ -134,13 +133,15 @@ if uploaded_file:
             })
 
     # ============================
-    # 2️⃣ HO001 LOGIC (LOCKED TO HO001)
+    # 2️⃣ HO001 LOGIC (MULTIPLE ROWS — SAME AS PYCHARM)
     # ============================
 
     ho_rows = []
     seq = 1
 
     for _, r in df_ho.iterrows():
+
+        branch = str(r[COL_BCODES_HO]).strip()
 
         account = r[COL_ACCOUNT]
         sub_acc = r[COL_SUB_ACCOUNT]
@@ -160,7 +161,7 @@ if uploaded_file:
             "Sequence": seq,
             "Account": account,
             "Sub Account": "" if pd.isna(sub_acc) else sub_acc,
-            "Department": "HO001",      # HARDLOCK
+            "Department": branch,
             "Document Date": doc_date,
             "Debit": debit_amt,
             "Credit": credit_amt,
@@ -168,7 +169,7 @@ if uploaded_file:
             "Customer Id": "",
             "SAC/HSN": "",
             "Reference": ref,
-            "Branch Id": "HO001",      # HARDLOCK
+            "Branch Id": branch,
             "Invoice Num": "",
             "Comments": ref
         })
@@ -176,7 +177,7 @@ if uploaded_file:
         seq += 1
 
     # ============================
-    # 3️⃣ HO001 ADJUSTMENT SHEET
+    # 3️⃣ NEW SHEET: HO001_ADJUSTMENT_JV (BASED ONLY ON AK COLUMN)
     # ============================
 
     adj_rows = []
@@ -208,7 +209,7 @@ if uploaded_file:
         )
         df["_AK_NUM"] = pd.to_numeric(df["_AK_NUM"], errors="coerce").fillna(0)
 
-    # -------- LINE 1: TOTAL DEBIT LINE (413201 / HO0005) --------
+    # -------- LINE 1: TOTAL DEBIT LINE --------
     total_amount = df["_AK_NUM"].sum()
 
     adj_rows.append({
