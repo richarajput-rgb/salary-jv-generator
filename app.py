@@ -15,16 +15,41 @@ if uploaded_file:
     file_bytes = uploaded_file.read()
     df = pd.read_excel(file_bytes, header=None, engine="openpyxl")
 
+    # =====================================================
+    # ✅ NEW: DOCUMENT DATE AUTO-SEARCH FROM SHEET (SAFE)
+    # =====================================================
+
+    doc_date = None
+
+    # Search first 5 rows and first 10 columns for a valid date
+    for row in range(5):
+        for col in range(10):
+            val = str(df.iloc[row, col]).strip()
+            try:
+                datetime.strptime(val, "%d-%m-%Y")
+                doc_date = val
+                break
+            except:
+                continue
+        if doc_date:
+            break
+
+    # Fallback if not found
+    if not doc_date:
+        doc_date = "31-03-2026"
+
+    month_year = datetime.strptime(doc_date, "%d-%m-%Y").strftime("%B %Y")
+    ref = f"BEING SALARY ENTRY POSTED FOR {month_year}"
+
+    st.success(f"📅 Document Date detected: {doc_date}")
+
+    # =====================================================
+
     # -------- Extract C1–K1 accounts for other branches --------
     account_headers = df.iloc[0, 2:11].values  # C1 to K1
 
     # Start from row 2 (as per your sheet)
     df = df.iloc[2:].reset_index(drop=True)
-
-    # -------- Document date & reference --------
-    doc_date = "31-03-2026"
-    month_year = datetime.strptime(doc_date, "%d-%m-%Y").strftime("%B %Y")
-    ref = f"BEING SALARY ENTRY POSTED FOR {month_year}"
 
     # ============================
     # COLUMN POSITIONS
@@ -192,7 +217,6 @@ if uploaded_file:
     adj_rows = []
     seq = 1
 
-    # Auto-detect AK column (AJ=35 or AK=36)
     possible_ak_cols = [35, 36]
 
     for col in possible_ak_cols:
@@ -218,7 +242,6 @@ if uploaded_file:
         )
         df["_AK_NUM"] = pd.to_numeric(df["_AK_NUM"], errors="coerce").fillna(0)
 
-    # -------- LINE 1: TOTAL DEBIT LINE --------
     total_amount = df["_AK_NUM"].sum()
 
     adj_rows.append({
@@ -241,7 +264,6 @@ if uploaded_file:
 
     seq += 1
 
-    # -------- SUPPLIER-WISE LINES --------
     df_valid = df[df["_AK_NUM"] != 0].copy()
 
     for _, r in df_valid.iterrows():
