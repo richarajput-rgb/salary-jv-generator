@@ -16,25 +16,36 @@ if uploaded_file:
     df = pd.read_excel(file_bytes, header=None, engine="openpyxl")
 
     # =====================================================
-    # ✅ NEW: DOCUMENT DATE AUTO-SEARCH FROM SHEET (SAFE)
+    # ✅ DOCUMENT DATE LOGIC (1) SHEET NAME → (2) CELL → (3) FALLBACK
     # =====================================================
+
+    # ---- STEP 1: Try to take date from SHEET NAME ----
+    xls = pd.ExcelFile(uploaded_file, engine="openpyxl")
+    sheet_name = xls.sheet_names[0]   # First sheet ka naam
 
     doc_date = None
 
-    # Search first 5 rows and first 10 columns for a valid date
-    for row in range(5):
-        for col in range(10):
-            val = str(df.iloc[row, col]).strip()
-            try:
-                datetime.strptime(val, "%d-%m-%Y")
-                doc_date = val
-                break
-            except:
-                continue
-        if doc_date:
-            break
+    try:
+        datetime.strptime(sheet_name, "%d-%m-%Y")
+        doc_date = sheet_name
+    except:
+        doc_date = None
 
-    # Fallback if not found
+    # ---- STEP 2: If sheet name is NOT a date, search inside sheet ----
+    if not doc_date:
+        for row in range(5):
+            for col in range(10):
+                val = str(df.iloc[row, col]).strip()
+                try:
+                    datetime.strptime(val, "%d-%m-%Y")
+                    doc_date = val
+                    break
+                except:
+                    continue
+            if doc_date:
+                break
+
+    # ---- STEP 3: Final fallback ----
     if not doc_date:
         doc_date = "31-03-2026"
 
@@ -65,7 +76,7 @@ if uploaded_file:
     COL_DEBIT = 31          # AF
     COL_CREDIT = 32         # AG
 
-    # -------- CLEAN BRANCH COLUMN (CRITICAL) --------
+    # -------- CLEAN BRANCH COLUMN --------
     df["__BRANCH_CLEAN"] = (
         df[COL_BCODES]
         .astype(str)
@@ -74,13 +85,18 @@ if uploaded_file:
     )
 
     # ============================
-    # STRICT FILTERS (NO NaN IN BRANCH SHEET)
+    # FILTER DATA
     # ============================
 
-    # HO001 rows (same as your file logic)
-    df_ho = df[df.iloc[:, COL_BCODES_HO].astype(str).str.strip().str.upper() == "HO001"].copy()
+    # HO001 rows
+    df_ho = df[
+        df.iloc[:, COL_BCODES_HO]
+        .astype(str)
+        .str.strip()
+        .str.upper() == "HO001"
+    ].copy()
 
-    # OTHER BRANCHES — STRICT (REMOVE BLANK / "nan")
+    # Other branches
     df_others = (
         df[df["__BRANCH_CLEAN"] != "HO001"]
         .copy()
@@ -113,7 +129,7 @@ if uploaded_file:
     ]
 
     # ============================
-    # 1️⃣ OTHER BRANCHES LOGIC (NO nan ROWS NOW)
+    # 1️⃣ OTHER BRANCHES LOGIC
     # ============================
 
     all_rows = []
@@ -132,6 +148,7 @@ if uploaded_file:
 
             account = int(account)
 
+            # Debit line
             all_rows.append({
                 "Journal Code": "JV",
                 "Sequence": 1,
@@ -150,6 +167,7 @@ if uploaded_file:
                 "Comments": ref
             })
 
+            # Credit line
             all_rows.append({
                 "Journal Code": "JV",
                 "Sequence": 2,
@@ -169,7 +187,7 @@ if uploaded_file:
             })
 
     # ============================
-    # 2️⃣ HO001 LOGIC (MULTIPLE ROWS)
+    # 2️⃣ HO001 LOGIC
     # ============================
 
     ho_rows = []
@@ -187,9 +205,6 @@ if uploaded_file:
 
         account = int(account)
 
-        debit_amt = "" if pd.isna(debit_input) else debit_input
-        credit_amt = "" if pd.isna(credit_input) else credit_input
-
         ho_rows.append({
             "Journal Code": "JV",
             "Sequence": seq,
@@ -197,8 +212,8 @@ if uploaded_file:
             "Sub Account": "" if pd.isna(sub_acc) or str(sub_acc).lower() == "nan" else str(sub_acc),
             "Department": "HO001",
             "Document Date": doc_date,
-            "Debit": debit_amt,
-            "Credit": credit_amt,
+            "Debit": "" if pd.isna(debit_input) else debit_input,
+            "Credit": "" if pd.isna(credit_input) else credit_input,
             "Supplier Id": "",
             "Customer Id": "",
             "SAC/HSN": "",
